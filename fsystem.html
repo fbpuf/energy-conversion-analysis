@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta HTTP-EQUIV="Cache-Control" CONTENT="max-age=31536000">
+    <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=1">
+    <title>等效电路模型分析系统</title>
+    
+    <!-- 引入依赖库 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@3.3.7/dist/css/bootstrap.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/jquery@1.12.4/dist/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@3.3.7/dist/js/bootstrap.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.1/papaparse.min.js"></script>
+
+    <style>
+        .panel { margin-top: 10px; }
+        .plot-container { height: 300px; margin: 10px 0; }
+        .row { display: flex; flex-direction: column; }
+        @media (min-width: 768px) {
+            .row { flex-direction: row; }
+            .col-md-4 { flex-basis: 30%; max-width: 30%; }
+            .col-md-8 { flex-basis: 70%; max-width: 70%; }
+        }
+        .result-scroll { max-height: 90vh; overflow-y: auto; }
+        .export-btn { margin-top: 15px; }
+        .negative-value { color: red; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="row">
+            <div class="col-md-4">
+                <div class="panel panel-info">
+                    <div class="panel-heading">
+                        <h3 class="panel-title">参数输入</h3>
+                    </div>
+                    <div class="panel-body">
+                        <div class="form-group">
+                            <label>电导率 σ (S/m)</label>
+                            <input type="number" class="form-control" id="conductivity" value="1" step="0.01" required>
+                        </div>
+                        <div class="form-group">
+                            <label>上传数据文件 (CSV格式: 频率(GHz), 介电实部, 介电虚部, 磁导实部, 磁导虚部)</label>
+                            <input type="file" class="form-control" id="dataFile" accept=".csv">
+                        </div>
+                        <button class="btn btn-primary btn-block" id="calculateBtn">计算等效电路参数</button>
+                    </div>
+                </div>
+                
+                <div class="panel panel-success">
+                    <div class="panel-heading">
+                        <h3 class="panel-title">材料信息</h3>
+                    </div>
+                    <div class="panel-body" id="materialInfo">
+                        <p>频率范围: <span id="freqRange">-</span></p>
+                        <p>介电常数实部范围: <span id="epsilon1Range">-</span></p>
+                        <p>介电常数虚部范围: <span id="epsilon2Range">-</span></p>
+                        <p>磁导率实部范围: <span id="mu1Range">-</span></p>
+                        <p>磁导率虚部范围: <span id="mu2Range">-</span></p>
+                        <p>ED/ET范围: <span id="edEtRange">-</span></p>
+                        <p>ES/ET范围: <span id="esEtRange">-</span></p>
+                        <p>ED/ES范围: <span id="edEsRange">-</span></p>
+                        <p>RP范围: <span id="rpRange">-</span></p>
+                        <p>RC范围: <span id="rcRange">-</span></p>
+                        <p>RM范围: <span id="rmRange">-</span></p>
+                        <div id="materialWarnings"></div>
+                        <button class="btn btn-info export-btn" id="exportSummaryInfo">导出汇总信息(CSV)</button>
+                        <button class="btn btn-info export-btn" id="exportFullData">导出全量数据(CSV)</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-8 result-scroll">
+                <div class="panel panel-warning">
+                    <div class="panel-heading">
+                        <h3 class="panel-title">计算结果</h3>
+                    </div>
+                    <div class="panel-body row-chart">
+                        <div class="chart-col">
+                            <div class="plot-container" id="tab1"></div>
+                        </div>
+                        <div class="chart-col">
+                            <div class="plot-container" id="tab2"></div>
+                        </div>
+                        <div class="chart-col">
+                            <div class="plot-container" id="tab3"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal fade" id="dataModal" tabindex="-1" role="dialog">
+            <div class="modal-dialog modal-lg" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                        <h4 class="modal-title">全量数据</h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="table-responsive">
+                            <table class="table table-striped table-bordered" id="fullDataTable">
+                                <thead>
+                                    <tr>
+                                        <th>频率 (GHz)</th>
+                                        <th>介电实部</th>
+                                        <th>介电虚部</th>
+                                        <th>磁导实部</th>
+                                        <th>磁导虚部</th>
+                                        <th>ED/ET</th>
+                                        <th>ES/ET</th>
+                                        <th>ED/ES</th>
+                                        <th>RP</th>
+                                        <th>RC</th>
+                                        <th>RM</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="fullDataBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">关闭</button>
+                        <button type="button" class="btn btn-primary" id="exportModalData">导出表格数据(CSV)</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="alert alert-warning" id="warningMsg" role="alert"></div>
+    </div>
+
+    <script>
+        const EPSILON_0 = 8.854e-12;
+        const MU_0 = 4 * Math.PI * 1e-7; // 真空磁导率
+        const ETA_0 = 376.73; // 自由空间波阻抗的近似值
+        let data = null;
+
+        function parseCSV(csvData) {
+            // 跳过前13行表头（包含元数据行），从第14行开始解析
+            const lines = csvData.split('\n').slice(13);
+            
+            return lines.reduce((acc, line) => {
+                const trimmedLine = line.trim();
+                if (!trimmedLine) return acc; // 跳过空行
+                
+                const values = trimmedLine.split(',').map(Number);
+                if (values.length === 5 && !values.some(isNaN)) {
+                    acc.f.push(values[0]);
+                    acc.epsilon1.push(values[1]);
+                    acc.epsilon2.push(values[2]);
+                    acc.mu1.push(values[3]);
+                    acc.mu2.push(values[4]);
+                }
+                return acc;
+            }, { 
+                f: [], 
+                epsilon1: [], 
+                epsilon2: [], 
+                mu1: [], 
+                mu2: [],
+                edEt: [],
+                esEt: [],
+                edEs: [],
+                rp: [],
+                rc: [],
+                rm: []
+            });
+        }
+
+        function calculateConductiveLoss(freqGHz, sigma) {
+            const freqHz = freqGHz * 1e9;
+            const omega = 2 * Math.PI * freqHz;
+            return sigma / (omega * EPSILON_0);
+        }
+
+        function complexDivide(a, b, c, d) {
+            const denominator = c*c + d*d;
+            return {
+                real: (a*c + b*d) / denominator,
+                imag: (b*c - a*d) / denominator
+            };
+        }
+
+        function complexSqrt(real, imag) {
+            const magnitude = Math.sqrt(real*real + imag*imag);
+            const realPart = Math.sqrt((magnitude + real) / 2);
+            const imagPart = Math.sign(imag) * Math.sqrt((magnitude - real) / 2);
+            return { real: realPart, imag: imagPart };
+        }
+
+        function calculateWaveImpedance(epsilon1, epsilon2, mu1, mu2) {
+            const muOverEpsilon = complexDivide(mu1, -mu2, epsilon1, -epsilon2);
+            const sqrtResult = complexSqrt(muOverEpsilon.real, muOverEpsilon.imag);
+            const magnitude = Math.sqrt(sqrtResult.real * sqrtResult.real + sqrtResult.imag * sqrtResult.imag);
+            const phase = Math.atan2(sqrtResult.imag, sqrtResult.real) * 180 / Math.PI;
+            return { magnitude, phase };
+        }
+
+        function getFieldAmplitudes(epsilon1, epsilon2, mu1, mu2) {
+            const waveImpedance = calculateWaveImpedance(epsilon1, epsilon2, mu1, mu2);
+            return { e0: 1, h0: 1 / waveImpedance.magnitude };
+        }
+
+        function calculateES(freqGHz, epsilon1, mu1, epsilon2, mu2) {
+            const { e0, h0 } = getFieldAmplitudes(epsilon1, epsilon2, mu1, mu2);
+            const freqHz = freqGHz * 1e9;
+            return Math.PI * freqHz * epsilon1 * Math.pow(e0, 2) + 
+                   Math.PI * freqHz * mu1 * Math.pow(h0, 2);
+        }
+
+        function calculateED(freqGHz, epsilon2, mu2, epsilon1, mu1) {
+            const { e0, h0 } = getFieldAmplitudes(epsilon1, epsilon2, mu1, mu2);
+            const freqHz = freqGHz * 1e9;
+            return Math.PI * freqHz * epsilon2 * Math.pow(e0, 2) + 
+                   Math.PI * freqHz * mu2 * Math.pow(h0, 2);
+        }
+
+        function calculateEP(freqGHz, epsilon2, cl) {
+            return epsilon2 - cl;
+        }
+
+        function calculateEC(freqGHz, cl) {
+            return cl;
+        }
+
+        function calculateEM(freqGHz, mu2) {
+            return mu2;
+        }
+
+        function calculateSP(freqGHz, ep, e0) {
+            const freqHz = freqGHz * 1e9;
+            return Math.PI * freqHz * ep * Math.pow(e0, 2);
+        }
+
+        function calculateSC(freqGHz, ec, e0) {
+            const freqHz = freqGHz * 1e9;
+            return Math.PI * freqHz * ec * Math.pow(e0, 2);
+        }
+
+        function calculateSM(freqGHz, em, h0) {
+            const freqHz = freqGHz * 1e9;
+            return Math.PI * freqHz * em * Math.pow(h0, 2);
+        }
+
+        function plotLossContributions() {
+            if (!data.f.length) return;
+            const sigma = parseFloat($('#conductivity').val());
+            const dielectricLoss = data.epsilon2;
+            const polarizationLoss = [];
+            const conductionLoss = [];
+            
+            data.f.forEach((f, i) => {
+                const cl = calculateConductiveLoss(f, sigma);
+                polarizationLoss.push(calculateEP(f, data.epsilon2[i], cl));
+                conductionLoss.push(cl);
+            });
+
+            Plotly.newPlot('tab1', [
+                {x: data.f, y: dielectricLoss, type: 'lines', name: 'Dielectric loss'},
+                {x: data.f, y: polarizationLoss, type: 'lines', name: 'Polarization loss'},
+                {x: data.f, y: conductionLoss, type: 'lines', name: 'Conduction loss'}
+            ], { title: 'Loss analysis', xaxis: {title: 'Frequency (GHz)'}, yaxis: {title: 'Loss'}, height: 300 });
+        }
+
+        function plotEdEsRatio() {
+            if (!data.f.length) return;
+
+            Plotly.newPlot('tab2', [
+                {x: data.f, y: data.edEt, type: 'lines', name: 'ED/ET'},
+                {x: data.f, y: data.esEt, type: 'lines', name: 'ES/ET'},
+                {x: data.f, y: data.edEs, type: 'lines', name: 'ED/ES'}
+            ], { title: 'Energy conversion analysis', xaxis: {title: 'Frequency (GHz)'}, yaxis: {title: 'Percentage'}, height: 300 });
+        }
+
+        function plotComponentLosses() {
+            if (!data.f.length) return;
+
+            Plotly.newPlot('tab3', [
+                {x: data.f, y: data.rp, type: 'lines', name: 'RP'},
+                {x: data.f, y: data.rc, type: 'lines', name: 'RC'},
+                {x: data.f, y: data.rm, type: 'lines', name: 'RM'}
+            ], { title: 'Loss ability', xaxis: {title: 'Frequency (GHz)'}, yaxis: {title: 'Percentage'}, height: 300 });
+        }
+
+        function calculateAllRatios(sigma) {
+            if (!data || !data.f || data.f.length === 0) return;
+            
+            data.f.forEach((f, i) => {
+                // 计算ED/ET, ES/ET, ED/ES
+                const es = calculateES(f, data.epsilon1[i], data.mu1[i], data.epsilon2[i], data.mu2[i]);
+                const ed = calculateED(f, data.epsilon2[i], data.mu2[i], data.epsilon1[i], data.mu1[i]);
+                const et = es + ed;
+                
+                data.edEt.push(et === 0 ? 0 : ed / et);
+                data.esEt.push(et === 0 ? 0 : es / et);
+                data.edEs.push(es === 0 ? 0 : ed / es);
+                
+                // 计算RP, RC, RM
+                const cl = calculateConductiveLoss(f, sigma);
+                const ep = calculateEP(f, data.epsilon2[i], cl);
+                const ec = calculateEC(f, cl);
+                const em = calculateEM(f, data.mu2[i]);
+                
+                const { e0, h0 } = getFieldAmplitudes(data.epsilon1[i], data.epsilon2[i], data.mu1[i], data.mu2[i]);
+                const sp = calculateSP(f, ep, e0);
+                const sc = calculateSC(f, ec, e0);
+                const sm = calculateSM(f, em, h0);
+                
+                data.rp.push(ed === 0 ? 0 : sp / ed);
+                data.rc.push(ed === 0 ? 0 : sc / ed);
+                data.rm.push(ed === 0 ? 0 : sm / ed);
+            });
+        }
+
+        function updateMaterialInfo() {
+            if (!data || !data.f || data.f.length === 0) return;
+            
+            const formatRange = (values, decimalPlaces = 6) => {
+                if (!values || values.length === 0) return '-';
+                const min = Math.min(...values);
+                const max = Math.max(...values);
+                const hasNegative = values.some(v => v < 0);
+                const negativeMarker = hasNegative ? ' <span class="negative-value">(存在负值)</span>' : '';
+                return `${min.toFixed(decimalPlaces)} - ${max.toFixed(decimalPlaces)}${negativeMarker}`;
+            };
+            
+            $('#freqRange').html(formatRange(data.f, 3));
+            $('#epsilon1Range').html(formatRange(data.epsilon1));
+            $('#epsilon2Range').html(formatRange(data.epsilon2));
+            $('#mu1Range').html(formatRange(data.mu1));
+            $('#mu2Range').html(formatRange(data.mu2));
+            $('#edEtRange').html(formatRange(data.edEt));
+            $('#esEtRange').html(formatRange(data.esEt));
+            $('#edEsRange').html(formatRange(data.edEs));
+            $('#rpRange').html(formatRange(data.rp));
+            $('#rcRange').html(formatRange(data.rc));
+            $('#rmRange').html(formatRange(data.rm));
+            
+            // 警告信息处理
+            const warnings = [];
+            if (data.epsilon1.some(v => v <= 0)) warnings.push("介电常数实部存在非正值");
+            if (data.mu1.some(v => v <= 0)) warnings.push("磁导率实部存在非正值");
+            if (data.epsilon2.some(v => v < 0)) warnings.push("介电常数虚部存在负值");
+            if (data.mu2.some(v => v < 0)) warnings.push("磁导率虚部存在负值");
+            
+            const warningsHtml = warnings.length > 0 
+                ? `<div class="alert alert-danger">警告：${warnings.join('；')}</div>` 
+                : '';
+            
+            $('#materialWarnings').html(warningsHtml);
+        }
+
+        function updateFullDataTable() {
+            if (!data || !data.f || data.f.length === 0) return;
+            
+            const tbody = $('#fullDataBody');
+            tbody.empty();
+            
+            data.f.forEach((freq, i) => {
+                const row = $('<tr>');
+                row.append(`<td>${freq.toFixed(3)}</td>`);
+                row.append(`<td>${data.epsilon1[i].toFixed(6)}</td>`);
+                row.append(`<td>${data.epsilon2[i].toFixed(6)}</td>`);
+                row.append(`<td>${data.mu1[i].toFixed(6)}</td>`);
+                row.append(`<td>${data.mu2[i].toFixed(6)}</td>`);
+                row.append(`<td>${data.edEt[i].toFixed(6)}</td>`);
+                row.append(`<td>${data.esEt[i].toFixed(6)}</td>`);
+                row.append(`<td>${data.edEs[i].toFixed(6)}</td>`);
+                row.append(`<td>${data.rp[i].toFixed(6)}</td>`);
+                row.append(`<td>${data.rc[i].toFixed(6)}</td>`);
+                row.append(`<td>${data.rm[i].toFixed(6)}</td>`);
+                
+                tbody.append(row);
+            });
+            
+            // 不再自动打开模态框
+            // $('#dataModal').modal('show');
+        }
+
+        function exportSummaryInfo() {
+            if (!data || !data.f || data.f.length === 0) return;
+            
+            let csvContent = "参数,最小值,最大值\n";
+            csvContent += `频率范围(GHz),${Math.min(...data.f).toFixed(3)},${Math.max(...data.f).toFixed(3)}\n`;
+            csvContent += `介电常数实部,${Math.min(...data.epsilon1).toFixed(6)},${Math.max(...data.epsilon1).toFixed(6)}\n`;
+            csvContent += `介电常数虚部,${Math.min(...data.epsilon2).toFixed(6)},${Math.max(...data.epsilon2).toFixed(6)}\n`;
+            csvContent += `磁导率实部,${Math.min(...data.mu1).toFixed(6)},${Math.max(...data.mu1).toFixed(6)}\n`;
+            csvContent += `磁导率虚部,${Math.min(...data.mu2).toFixed(6)},${Math.max(...data.mu2).toFixed(6)}\n`;
+            csvContent += `ED/ET,${Math.min(...data.edEt).toFixed(6)},${Math.max(...data.edEt).toFixed(6)}\n`;
+            csvContent += `ES/ET,${Math.min(...data.esEt).toFixed(6)},${Math.max(...data.esEt).toFixed(6)}\n`;
+            csvContent += `ED/ES,${Math.min(...data.edEs).toFixed(6)},${Math.max(...data.edEs).toFixed(6)}\n`;
+            csvContent += `RP,${Math.min(...data.rp).toFixed(6)},${Math.max(...data.rp).toFixed(6)}\n`;
+            csvContent += `RC,${Math.min(...data.rc).toFixed(6)},${Math.max(...data.rc).toFixed(6)}\n`;
+            csvContent += `RM,${Math.min(...data.rm).toFixed(6)},${Math.max(...data.rm).toFixed(6)}\n`;
+            
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.setAttribute('href', url);
+            link.setAttribute('download', '材料参数汇总.csv');
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function exportFullData() {
+            if (!data || !data.f || data.f.length === 0) return;
+            
+            let csvContent = "频率(GHz),介电实部,介电虚部,磁导实部,磁导虚部,ED/ET,ES/ET,ED/ES,RP,RC,RM\n";
+            
+            data.f.forEach((freq, i) => {
+                csvContent += `${freq.toFixed(3)},${data.epsilon1[i].toFixed(6)},${data.epsilon2[i].toFixed(6)},`;
+                csvContent += `${data.mu1[i].toFixed(6)},${data.mu2[i].toFixed(6)},${data.edEt[i].toFixed(6)},`;
+                csvContent += `${data.esEt[i].toFixed(6)},${data.edEs[i].toFixed(6)},${data.rp[i].toFixed(6)},`;
+                csvContent += `${data.rc[i].toFixed(6)},${data.rm[i].toFixed(6)}\n`;
+            });
+            
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.setAttribute('href', url);
+            link.setAttribute('download', '材料参数全量数据.csv');
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function exportModalData() {
+            const rows = [];
+            const $rows = $('#fullDataTable tbody tr');
+            
+            if ($rows.length === 0) {
+                alert('没有数据可导出');
+                return;
+            }
+            
+            // 添加表头
+            let headers = [];
+            $('#fullDataTable thead th').each(function() {
+                headers.push($(this).text().trim());
+            });
+            rows.push(headers.join(','));
+            
+            // 添加数据行
+            $rows.each(function() {
+                let row = [];
+                $('td', this).each(function() {
+                    row.push($(this).text().trim());
+                });
+                rows.push(row.join(','));
+            });
+            
+            const csvContent = rows.join('\n');
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.setAttribute('href', url);
+            link.setAttribute('download', '表格数据.csv');
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function clearWarnings() {
+            $('#warningMsg').text('');
+        }
+
+        $(document).ready(function() {
+            // 初始化页面
+            clearWarnings();
+            
+            // 绑定按钮事件
+            $('#calculateBtn').on('click', function() {
+                const file = $('#dataFile')[0].files[0];
+                const sigma = parseFloat($('#conductivity').val());
+                
+                if (!file) {
+                    alert('请上传数据文件');
+                    return;
+                }
+                
+                if (isNaN(sigma) || sigma < 0) {
+                    $('#warningMsg').text('电导率必须为非负数');
+                    return;
+                }
+                
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    data = parseCSV(e.target.result);
+                    if (data.f.length < 2) {
+                        alert('数据至少需要两行有效记录');
+                        return;
+                    }
+
+                    // 补充计算频率范围
+                    if (data.f.length > 0) {
+                        data.freqMin = Math.min(...data.f);
+                        data.freqMax = Math.max(...data.f);
+                    }
+                    
+                    // 计算所有比率
+                    calculateAllRatios(sigma);
+                    
+                    // 更新UI
+                    updateFullDataTable(); // 更新表格数据但不弹出模态框
+                    updateMaterialInfo();
+                    plotLossContributions();
+                    plotEdEsRatio();
+                    plotComponentLosses();
+                    
+                    // 绑定导出事件
+                    $('#exportSummaryInfo').on('click', exportSummaryInfo);
+                    $('#exportFullData').on('click', exportFullData);
+                    $('#exportModalData').on('click', exportModalData);
+                    
+                    clearWarnings();
+                };
+                reader.readAsText(file);
+            });
+        });
+    </script>
+</body>
+</html>
