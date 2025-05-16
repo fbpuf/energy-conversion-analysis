@@ -41,6 +41,19 @@
                             <label>电导率 σ (S/m)</label>
                             <input type="number" class="form-control" id="conductivity" value="1" step="0.01" required>
                         </div>
+                        
+                        <!-- 新增厚度范围输入 -->
+                        <div class="form-group">
+                            <label>厚度范围 (mm)</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" id="thicknessMin" value="1" step="0.01" placeholder="最小厚度" required> <!-- 修改默认值为1 -->
+                                <span class="input-group-addon">~</span>
+                                <input type="number" class="form-control" id="thicknessMax" value="5" step="0.01" placeholder="最大厚度" required> <!-- 修改默认值为5 -->
+                                <span class="input-group-addon">间隔</span>
+                                <input type="number" class="form-control" id="thicknessStep" value="0.1" step="0.01" placeholder="mm" required>
+                            </div>
+                        </div>
+
                         <div class="form-group">
                             <label>上传数据文件 (CSV格式: 频率(GHz), 介电实部, 介电虚部, 磁导实部, 磁导虚部)</label>
                             <input type="file" class="form-control" id="dataFile" accept=".csv">
@@ -68,6 +81,8 @@
                         <div id="materialWarnings"></div>
                         <button class="btn btn-info export-btn" id="exportSummaryInfo">导出汇总信息(CSV)</button>
                         <button class="btn btn-info export-btn" id="exportFullData">导出全量数据(CSV)</button>
+                        <!-- 新增阻抗匹配导出按钮 -->
+                        <button class="btn btn-info export-btn" id="exportImpedanceData">导出阻抗匹配数据(CSV)</button>
                     </div>
                 </div>
             </div>
@@ -86,6 +101,10 @@
                         </div>
                         <div class="chart-col">
                             <div class="plot-container" id="tab3"></div>
+                        </div>
+                        <!-- 新增阻抗匹配绘图区域 -->
+                        <div class="chart-col">
+                            <div class="plot-container" id="tab4"></div>
                         </div>
                     </div>
                 </div>
@@ -139,7 +158,33 @@
         const EPSILON_0 = 8.854e-12;
         const MU_0 = 4 * Math.PI * 1e-7; // 真空磁导率
         const ETA_0 = 376.73; // 自由空间波阻抗的近似值
+        const C = 3e8; // 光速 m/s
         let data = null;
+
+        // 新增复数运算函数
+        function complexMultiply(aReal, aImag, bReal, bImag) {
+            return {
+                real: aReal * bReal - aImag * bImag,
+                imag: aReal * bImag + aImag * bReal
+            };
+        }
+
+        function complexTanh(x, y) {
+            const cosh2x = (Math.exp(2*x) + Math.exp(-2*x)) / 2;
+            const sinh2x = (Math.exp(2*x) - Math.exp(-2*x)) / 2;
+            const cos2y = Math.cos(2*y);
+            const sin2y = Math.sin(2*y);
+            const denominator = cosh2x + cos2y;
+            
+            return {
+                real: sinh2x / denominator,
+                imag: sin2y / denominator
+            };
+        }
+
+        function complexAbs(real, imag) {
+            return Math.sqrt(real * real + imag * imag);
+        }
 
         // 改进的CSV解析函数 - 支持自动检测表头
         function parseCSV(csvData) {
@@ -191,7 +236,10 @@
                 rc: [],
                 rm: [],
                 polarizationLoss: [], // 新增极化损耗数组
-                conductionLoss: []     // 新增导电损耗数组
+                conductionLoss: [],     // 新增导电损耗数组
+                zinReal: [],            // 新增阻抗实部数组
+                zinImag: [],            // 新增阻抗虚部数组
+                zinAbs: []              // 新增阻抗绝对值数组
             });
         }
 
@@ -270,6 +318,52 @@
             return Math.PI * freqHz * em * Math.pow(h0, 2);
         }
 
+        // 新增阻抗匹配计算函数
+        function calculateImpedanceMatching(freqGHz, epsilon1, epsilon2, mu1, mu2, thickness) {
+            const f = freqGHz * 1e9; // Hz
+            const d = thickness * 0.001; // m
+            
+            const epsilon = { real: epsilon1, imag: -epsilon2 };
+            const mu = { real: mu1, imag: -mu2 };
+            
+            // 计算 μr/εr
+            const muOverEpsilon = complexDivide(mu.real, mu.imag, epsilon.real, epsilon.imag);
+            const sqrtMuOverEpsilon = complexSqrt(muOverEpsilon.real, muOverEpsilon.imag);
+            
+            // 计算 √(μrεr)
+            const muEpsilon = complexMultiply(mu.real, mu.imag, epsilon.real, epsilon.imag);
+            const sqrtMuEpsilon = complexSqrt(muEpsilon.real, muEpsilon.imag);
+            
+            // 计算指数部分 j(2πfd/c)√(μrεr)
+            const exponent = complexMultiply(
+                0, // j因子对应虚部
+                (2 * Math.PI * f * d) / C,
+                sqrtMuEpsilon.real,
+                sqrtMuEpsilon.imag
+            );
+            
+            // 计算双曲正切
+            const tanhResult = complexTanh(exponent.real, exponent.imag);
+            
+            // 计算输入阻抗 Zin = √(μr/εr) * tanh(...)
+            const zin = complexMultiply(
+                sqrtMuOverEpsilon.real,
+                sqrtMuOverEpsilon.imag,
+                tanhResult.real,
+                tanhResult.imag
+            );
+            
+            // 计算阻抗绝对值
+            const zinAbs = complexAbs(zin.real, zin.imag);
+            
+            return { 
+                zinReal: zin.real, 
+                zinImag: zin.imag,
+                zinAbs: zinAbs,
+                thickness: thickness 
+            };
+        }
+
         function plotLossContributions() {
             if (!data.f.length) return;
             const sigma = parseFloat($('#conductivity').val());
@@ -304,8 +398,51 @@
             ], { title: 'Loss ability', xaxis: {title: 'Frequency (GHz)'}, yaxis: {title: 'Percentage'}, height: 300 });
         }
 
-        function calculateAllRatios(sigma) {
+        // 新增阻抗匹配绘图函数
+        function plotImpedanceMatching() {
+            if (!data || !data.f.length || !data.thicknesses?.length) return;
+            
+            // 从厚度数组中均匀选择5个值
+            const selectedThicknesses = [];
+            const thicknesses = data.thicknesses;
+            const count = Math.min(5, thicknesses.length);
+            
+            for (let i = 0; i < count; i++) {
+                const index = Math.round(i * (thicknesses.length - 1) / (count - 1));
+                selectedThicknesses.push(thicknesses[index]);
+            }
+            
+            const traces = [];
+            
+            // 为每个选定的厚度绘制阻抗绝对值曲线
+            selectedThicknesses.forEach(thickness => {
+                const thicknessIndex = data.thicknesses.indexOf(thickness);
+                if (thicknessIndex === -1) return;
+                
+                // 提取该厚度下所有频率的阻抗绝对值
+                const zinAbsValues = data.f.map((_, i) => data.zinAbs[i][thicknessIndex]);
+                
+                traces.push({
+                    x: data.f,
+                    y: zinAbsValues,
+                    type: 'lines',
+                    name: `Thickness ${thickness.toFixed(2)} mm`
+                });
+            });
+            
+            // 创建图表
+            Plotly.newPlot('tab4', traces, { 
+                title: 'Impedance matching', 
+                xaxis: {title: 'Frequency (GHz)'}, 
+                yaxis: {title: 'Input impedance'},
+                height: 300 
+            });
+        }
+
+        function calculateAllRatios(sigma, thicknesses) {
             if (!data || !data.f || data.f.length === 0) return;
+            
+            data.thicknesses = thicknesses; // 保存厚度数组
             
             data.f.forEach((f, i) => {
                 // 计算极化损耗和导电损耗
@@ -334,6 +471,24 @@
                 data.rp.push(ed === 0 ? 0 : sp / ed);
                 data.rc.push(ed === 0 ? 0 : sc / ed);
                 data.rm.push(ed === 0 ? 0 : sm / ed);
+
+                // 阻抗匹配计算
+                const zinResults = [];
+                thicknesses.forEach(thickness => {
+                    const { zinReal, zinImag, zinAbs } = calculateImpedanceMatching(
+                        f,
+                        data.epsilon1[i],
+                        data.epsilon2[i],
+                        data.mu1[i],
+                        data.mu2[i],
+                        thickness
+                    );
+                    zinResults.push({ zinReal, zinImag, zinAbs });
+                });
+                
+                data.zinReal.push(zinResults.map(r => r.zinReal));
+                data.zinImag.push(zinResults.map(r => r.zinImag));
+                data.zinAbs.push(zinResults.map(r => r.zinAbs));
             });
         }
 
@@ -424,6 +579,7 @@
             showAlert('汇总信息导出成功', 'success');
         }
 
+        // 修改全量数据导出，移除阻抗相关字段
         function exportFullData() {
             if (!data || !data.f || data.f.length === 0) {
                 showAlert('没有数据可导出', 'danger');
@@ -442,6 +598,33 @@
             
             downloadCSV(csvContent, '材料参数全量数据.csv');
             showAlert('全量数据导出成功', 'success');
+        }
+
+        // 新增阻抗匹配数据导出函数
+        function exportImpedanceData() {
+            if (!data || !data.f || data.f.length === 0 || !data.thicknesses?.length) {
+                showAlert('没有阻抗匹配数据可导出', 'danger');
+                return;
+            }
+            
+            // 生成表头
+            let csvContent = "频率(GHz)";
+            data.thicknesses.forEach(thickness => {
+                csvContent += `,${thickness.toFixed(2)}mm`;
+            });
+            csvContent += "\n";
+            
+            // 生成数据行
+            data.f.forEach((freq, i) => {
+                csvContent += `${freq.toFixed(3)}`;
+                data.zinAbs[i].forEach(zinAbs => {
+                    csvContent += `,${zinAbs.toFixed(6)}`;
+                });
+                csvContent += "\n";
+            });
+            
+            downloadCSV(csvContent, '阻抗匹配数据.csv');
+            showAlert('阻抗匹配数据导出成功', 'success');
         }
 
         function exportModalData() {
@@ -504,6 +687,9 @@
             $('#calculateBtn').on('click', function() {
                 const file = $('#dataFile')[0].files[0];
                 const sigma = parseFloat($('#conductivity').val());
+                const thicknessMin = parseFloat($('#thicknessMin').val());
+                const thicknessMax = parseFloat($('#thicknessMax').val());
+                const thicknessStep = parseFloat($('#thicknessStep').val());
                 
                 if (!file) {
                     showAlert('请上传数据文件', 'danger');
@@ -513,6 +699,17 @@
                 if (isNaN(sigma) || sigma < 0) {
                     showAlert('电导率必须为非负数', 'danger');
                     return;
+                }
+                
+                if (thicknessMin >= thicknessMax || thicknessStep <= 0) {
+                    showAlert('厚度范围设置错误，请检查输入', 'danger');
+                    return;
+                }
+                
+                // 生成厚度数组
+                const thicknesses = [];
+                for (let d = thicknessMin; d <= thicknessMax; d += thicknessStep) {
+                    thicknesses.push(d);
                 }
                 
                 const reader = new FileReader();
@@ -536,8 +733,8 @@
                             data.freqMax = Math.max(...data.f);
                         }
                         
-                        // 计算所有比率
-                        calculateAllRatios(sigma);
+                        // 计算所有比率和阻抗匹配
+                        calculateAllRatios(sigma, thicknesses);
                         
                         // 更新UI
                         updateFullDataTable();
@@ -545,11 +742,13 @@
                         plotLossContributions();
                         plotEdEsRatio();
                         plotComponentLosses();
+                        plotImpedanceMatching(); // 新增绘图调用
                         
                         // 绑定导出事件
                         $('#exportSummaryInfo').on('click', exportSummaryInfo);
                         $('#exportFullData').on('click', exportFullData);
                         $('#exportModalData').on('click', exportModalData);
+                        $('#exportImpedanceData').on('click', exportImpedanceData); // 新增绑定
                         
                         showAlert('计算完成', 'success');
                     } catch (error) {
