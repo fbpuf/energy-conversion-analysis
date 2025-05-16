@@ -109,6 +109,8 @@
                                         <th>介电虚部</th>
                                         <th>磁导实部</th>
                                         <th>磁导虚部</th>
+                                        <th>极化损耗</th>
+                                        <th>导电损耗</th>
                                         <th>ED/ET</th>
                                         <th>ES/ET</th>
                                         <th>ED/ES</th>
@@ -187,7 +189,9 @@
                 edEs: [],
                 rp: [],
                 rc: [],
-                rm: []
+                rm: [],
+                polarizationLoss: [], // 新增极化损耗数组
+                conductionLoss: []     // 新增导电损耗数组
             });
         }
 
@@ -270,15 +274,9 @@
             if (!data.f.length) return;
             const sigma = parseFloat($('#conductivity').val());
             const dielectricLoss = data.epsilon2;
-            const polarizationLoss = [];
-            const conductionLoss = [];
+            const polarizationLoss = data.polarizationLoss;
+            const conductionLoss = data.conductionLoss;
             
-            data.f.forEach((f, i) => {
-                const cl = calculateConductiveLoss(f, sigma);
-                polarizationLoss.push(calculateEP(f, data.epsilon2[i], cl));
-                conductionLoss.push(cl);
-            });
-
             Plotly.newPlot('tab1', [
                 {x: data.f, y: dielectricLoss, type: 'lines', name: 'Dielectric loss'},
                 {x: data.f, y: polarizationLoss, type: 'lines', name: 'Polarization loss'},
@@ -310,6 +308,12 @@
             if (!data || !data.f || data.f.length === 0) return;
             
             data.f.forEach((f, i) => {
+                // 计算极化损耗和导电损耗
+                const cl = calculateConductiveLoss(f, sigma);
+                const ep = calculateEP(f, data.epsilon2[i], cl);
+                data.polarizationLoss.push(ep); // 保存极化损耗
+                data.conductionLoss.push(cl);     // 保存导电损耗
+
                 // 计算ED/ET, ES/ET, ED/ES
                 const es = calculateES(f, data.epsilon1[i], data.mu1[i], data.epsilon2[i], data.mu2[i]);
                 const ed = calculateED(f, data.epsilon2[i], data.mu2[i], data.epsilon1[i], data.mu1[i]);
@@ -320,14 +324,11 @@
                 data.edEs.push(es === 0 ? 0 : ed / es);
                 
                 // 计算RP, RC, RM
-                const cl = calculateConductiveLoss(f, sigma);
-                const ep = calculateEP(f, data.epsilon2[i], cl);
-                const ec = calculateEC(f, cl);
                 const em = calculateEM(f, data.mu2[i]);
                 
                 const { e0, h0 } = getFieldAmplitudes(data.epsilon1[i], data.epsilon2[i], data.mu1[i], data.mu2[i]);
                 const sp = calculateSP(f, ep, e0);
-                const sc = calculateSC(f, ec, e0);
+                const sc = calculateSC(f, cl, e0); // 使用导电损耗cl计算SC
                 const sm = calculateSM(f, em, h0);
                 
                 data.rp.push(ed === 0 ? 0 : sp / ed);
@@ -387,6 +388,8 @@
                 row.append(`<td>${data.epsilon2[i].toFixed(6)}</td>`);
                 row.append(`<td>${data.mu1[i].toFixed(6)}</td>`);
                 row.append(`<td>${data.mu2[i].toFixed(6)}</td>`);
+                row.append(`<td>${data.polarizationLoss[i].toFixed(6)}</td>`); // 新增极化损耗
+                row.append(`<td>${data.conductionLoss[i].toFixed(6)}</td>`);     // 新增导电损耗
                 row.append(`<td>${data.edEt[i].toFixed(6)}</td>`);
                 row.append(`<td>${data.esEt[i].toFixed(6)}</td>`);
                 row.append(`<td>${data.edEs[i].toFixed(6)}</td>`);
@@ -427,11 +430,12 @@
                 return;
             }
             
-            let csvContent = "频率(GHz),介电实部,介电虚部,磁导实部,磁导虚部,ED/ET,ES/ET,ED/ES,RP,RC,RM\n";
+            let csvContent = "频率(GHz),介电实部,介电虚部,磁导实部,磁导虚部,极化损耗,导电损耗,ED/ET,ES/ET,ED/ES,RP,RC,RM\n";
             
             data.f.forEach((freq, i) => {
                 csvContent += `${freq.toFixed(3)},${data.epsilon1[i].toFixed(6)},${data.epsilon2[i].toFixed(6)},`;
-                csvContent += `${data.mu1[i].toFixed(6)},${data.mu2[i].toFixed(6)},${data.edEt[i].toFixed(6)},`;
+                csvContent += `${data.mu1[i].toFixed(6)},${data.mu2[i].toFixed(6)},${data.polarizationLoss[i].toFixed(6)},`; // 新增极化损耗
+                csvContent += `${data.conductionLoss[i].toFixed(6)},${data.edEt[i].toFixed(6)},`; // 新增导电损耗
                 csvContent += `${data.esEt[i].toFixed(6)},${data.edEs[i].toFixed(6)},${data.rp[i].toFixed(6)},`;
                 csvContent += `${data.rc[i].toFixed(6)},${data.rm[i].toFixed(6)}\n`;
             });
@@ -558,4 +562,4 @@
         });
     </script>
 </body>
-</html>    
+</html>
