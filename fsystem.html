@@ -25,6 +25,7 @@
         .result-scroll { max-height: 90vh; overflow-y: auto; }
         .export-btn { margin-top: 15px; }
         .negative-value { color: red; }
+        .alert { display: none; }
     </style>
 </head>
 <body>
@@ -128,7 +129,8 @@
             </div>
         </div>
 
-        <div class="alert alert-warning" id="warningMsg" role="alert"></div>
+        <div class="alert alert-danger" id="warningMsg" role="alert"></div>
+        <div class="alert alert-success" id="successMsg" role="alert"></div>
     </div>
 
     <script>
@@ -137,11 +139,31 @@
         const ETA_0 = 376.73; // 自由空间波阻抗的近似值
         let data = null;
 
+        // 改进的CSV解析函数 - 支持自动检测表头
         function parseCSV(csvData) {
-            // 跳过前13行表头（包含元数据行），从第14行开始解析
-            const lines = csvData.split('\n').slice(13);
+            const lines = csvData.split('\n');
             
-            return lines.reduce((acc, line) => {
+            // 自动检测表头行数
+            let headerCount = 0;
+            for (let i = 0; i < Math.min(20, lines.length); i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
+                
+                const values = line.split(',');
+                // 如果某行包含非数字值，认为是表头
+                if (values.some(v => isNaN(parseFloat(v)))) {
+                    headerCount++;
+                } else {
+                    break;
+                }
+            }
+            
+            console.log(`检测到${headerCount}行表头，从第${headerCount+1}行开始解析数据`);
+            
+            // 从表头后开始解析数据
+            const dataLines = lines.slice(headerCount);
+            
+            return dataLines.reduce((acc, line) => {
                 const trimmedLine = line.trim();
                 if (!trimmedLine) return acc; // 跳过空行
                 
@@ -374,13 +396,13 @@
                 
                 tbody.append(row);
             });
-            
-            // 不再自动打开模态框
-            // $('#dataModal').modal('show');
         }
 
         function exportSummaryInfo() {
-            if (!data || !data.f || data.f.length === 0) return;
+            if (!data || !data.f || data.f.length === 0) {
+                showAlert('没有数据可导出', 'danger');
+                return;
+            }
             
             let csvContent = "参数,最小值,最大值\n";
             csvContent += `频率范围(GHz),${Math.min(...data.f).toFixed(3)},${Math.max(...data.f).toFixed(3)}\n`;
@@ -395,19 +417,15 @@
             csvContent += `RC,${Math.min(...data.rc).toFixed(6)},${Math.max(...data.rc).toFixed(6)}\n`;
             csvContent += `RM,${Math.min(...data.rm).toFixed(6)},${Math.max(...data.rm).toFixed(6)}\n`;
             
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.setAttribute('href', url);
-            link.setAttribute('download', '材料参数汇总.csv');
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            downloadCSV(csvContent, '材料参数汇总.csv');
+            showAlert('汇总信息导出成功', 'success');
         }
 
         function exportFullData() {
-            if (!data || !data.f || data.f.length === 0) return;
+            if (!data || !data.f || data.f.length === 0) {
+                showAlert('没有数据可导出', 'danger');
+                return;
+            }
             
             let csvContent = "频率(GHz),介电实部,介电虚部,磁导实部,磁导虚部,ED/ET,ES/ET,ED/ES,RP,RC,RM\n";
             
@@ -418,15 +436,8 @@
                 csvContent += `${data.rc[i].toFixed(6)},${data.rm[i].toFixed(6)}\n`;
             });
             
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.setAttribute('href', url);
-            link.setAttribute('download', '材料参数全量数据.csv');
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+            downloadCSV(csvContent, '材料参数全量数据.csv');
+            showAlert('全量数据导出成功', 'success');
         }
 
         function exportModalData() {
@@ -434,7 +445,7 @@
             const $rows = $('#fullDataTable tbody tr');
             
             if ($rows.length === 0) {
-                alert('没有数据可导出');
+                showAlert('没有数据可导出', 'danger');
                 return;
             }
             
@@ -455,19 +466,30 @@
             });
             
             const csvContent = rows.join('\n');
+            downloadCSV(csvContent, '表格数据.csv');
+            showAlert('表格数据导出成功', 'success');
+        }
+
+        function downloadCSV(csvContent, filename) {
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.setAttribute('href', url);
-            link.setAttribute('download', '表格数据.csv');
+            link.setAttribute('download', filename);
             link.style.visibility = 'hidden';
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
         }
 
+        function showAlert(message, type) {
+            const alertEl = type === 'success' ? $('#successMsg') : $('#warningMsg');
+            alertEl.text(message).show().delay(3000).fadeOut();
+        }
+
         function clearWarnings() {
-            $('#warningMsg').text('');
+            $('#warningMsg').hide();
+            $('#successMsg').hide();
         }
 
         $(document).ready(function() {
@@ -480,49 +502,60 @@
                 const sigma = parseFloat($('#conductivity').val());
                 
                 if (!file) {
-                    alert('请上传数据文件');
+                    showAlert('请上传数据文件', 'danger');
                     return;
                 }
                 
                 if (isNaN(sigma) || sigma < 0) {
-                    $('#warningMsg').text('电导率必须为非负数');
+                    showAlert('电导率必须为非负数', 'danger');
                     return;
                 }
                 
                 const reader = new FileReader();
                 reader.onload = function(e) {
-                    data = parseCSV(e.target.result);
-                    if (data.f.length < 2) {
-                        alert('数据至少需要两行有效记录');
-                        return;
-                    }
-
-                    // 补充计算频率范围
-                    if (data.f.length > 0) {
-                        data.freqMin = Math.min(...data.f);
-                        data.freqMax = Math.max(...data.f);
-                    }
-                    
-                    // 计算所有比率
-                    calculateAllRatios(sigma);
-                    
-                    // 更新UI
-                    updateFullDataTable(); // 更新表格数据但不弹出模态框
-                    updateMaterialInfo();
-                    plotLossContributions();
-                    plotEdEsRatio();
-                    plotComponentLosses();
-                    
-                    // 绑定导出事件
-                    $('#exportSummaryInfo').on('click', exportSummaryInfo);
-                    $('#exportFullData').on('click', exportFullData);
-                    $('#exportModalData').on('click', exportModalData);
-                    
                     clearWarnings();
+                    
+                    try {
+                        // 解析CSV数据
+                        data = parseCSV(e.target.result);
+                        
+                        if (data.f.length === 0) {
+                            showAlert('未找到有效数据，请检查文件格式', 'danger');
+                            return;
+                        }
+                        
+                        console.log(`成功解析 ${data.f.length} 条数据`);
+                        
+                        // 补充计算频率范围
+                        if (data.f.length > 0) {
+                            data.freqMin = Math.min(...data.f);
+                            data.freqMax = Math.max(...data.f);
+                        }
+                        
+                        // 计算所有比率
+                        calculateAllRatios(sigma);
+                        
+                        // 更新UI
+                        updateFullDataTable();
+                        updateMaterialInfo();
+                        plotLossContributions();
+                        plotEdEsRatio();
+                        plotComponentLosses();
+                        
+                        // 绑定导出事件
+                        $('#exportSummaryInfo').on('click', exportSummaryInfo);
+                        $('#exportFullData').on('click', exportFullData);
+                        $('#exportModalData').on('click', exportModalData);
+                        
+                        showAlert('计算完成', 'success');
+                    } catch (error) {
+                        console.error('解析数据时出错:', error);
+                        showAlert(`解析数据时出错: ${error.message}`, 'danger');
+                    }
                 };
                 reader.readAsText(file);
             });
         });
     </script>
 </body>
-</html>
+</html>    
