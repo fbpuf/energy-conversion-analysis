@@ -158,7 +158,7 @@
         const EPSILON_0 = 8.854e-12;
         const MU_0 = 4 * Math.PI * 1e-7; // 真空磁导率
         const ETA_0 = 376.73; // 自由空间波阻抗的近似值
-        const C = 3e8; // 光速 m/s
+        const C = 299792458; // 光速 m/s（修改为精确值）
         let data = null;
 
         // 新增复数运算函数
@@ -337,7 +337,7 @@
             // 计算指数部分 j(2πfd/c)√(μrεr)
             const exponent = complexMultiply(
                 0, // j因子对应虚部
-                (2 * Math.PI * f * d) / C,
+                (2 * Math.PI * f * d) / C, // 使用修改后的光速值
                 sqrtMuEpsilon.real,
                 sqrtMuEpsilon.imag
             );
@@ -762,3 +762,4 @@
     </script>
 </body>
 </html>
+    
