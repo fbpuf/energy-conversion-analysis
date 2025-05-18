@@ -12,6 +12,9 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@3.3.7/dist/js/bootstrap.min.js"></script>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/papaparse@5.3.1/papaparse.min.js"></script>
+    
+    <!-- 新增XLSX导出库 -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
     <style>
         .panel { margin-top: 10px; }
@@ -81,7 +84,8 @@
                         <div id="materialWarnings"></div>
                         <button class="btn btn-info export-btn" id="exportSummaryInfo">导出汇总信息(CSV)</button>
                         <button class="btn btn-info export-btn" id="exportFullData">导出全量数据(CSV)</button>
-                        <!-- 新增阻抗匹配导出按钮 -->
+                        <!-- 新增XLSX导出按钮 -->
+                        <button class="btn btn-info export-btn" id="exportXlsxData">导出原始数据(XLSX)</button>
                         <button class="btn btn-info export-btn" id="exportImpedanceData">导出阻抗匹配数据(CSV)</button>
                     </div>
                 </div>
@@ -600,6 +604,38 @@
             showAlert('全量数据导出成功', 'success');
         }
 
+        // 新增XLSX导出函数
+        function exportXLSXData() {
+            if (!data || !data.f || data.f.length === 0 || !data.filename) {
+                showAlert('没有可导出的原始数据，请先上传文件', 'danger');
+                return;
+            }
+
+            // 准备原始数据
+            const rawData = [['频率', '介电实部', '介电虚部', '磁导率实部', '磁导率虚部']];
+            data.f.forEach((freq, i) => {
+                rawData.push([
+                    freq.toFixed(3),
+                    data.epsilon1[i].toFixed(6),
+                    data.epsilon2[i].toFixed(6),
+                    data.mu1[i].toFixed(6),
+                    data.mu2[i].toFixed(6)
+                ]);
+            });
+
+            // 创建工作簿
+            const workbook = XLSX.utils.book_new();
+            const worksheet = XLSX.utils.aoa_to_sheet(rawData);
+            XLSX.utils.book_append_sheet(workbook, worksheet, '原始数据');
+
+            // 生成文件名称（使用导入文件名，替换扩展名）
+            const fileName = data.filename.replace(/\.csv$/, '') + '.xlsx';
+
+            // 导出文件
+            XLSX.writeFile(workbook, fileName);
+            showAlert('原始数据已导出为XLSX文件', 'success');
+        }
+
         // 新增阻抗匹配数据导出函数
         function exportImpedanceData() {
             if (!data || !data.f || data.f.length === 0 || !data.thicknesses?.length) {
@@ -682,7 +718,14 @@
         $(document).ready(function() {
             // 初始化页面
             clearWarnings();
-            
+
+            // 移动事件绑定到文档加载完成时
+            $('#exportSummaryInfo').on('click', exportSummaryInfo);
+            $('#exportFullData').on('click', exportFullData);
+            $('#exportModalData').on('click', exportModalData);
+            $('#exportImpedanceData').on('click', exportImpedanceData);
+            $('#exportXlsxData').on('click', exportXLSXData);
+
             // 绑定按钮事件
             $('#calculateBtn').on('click', function() {
                 const file = $('#dataFile')[0].files[0];
@@ -706,6 +749,10 @@
                     return;
                 }
                 
+                // 保存文件名
+                data = data || {};
+                data.filename = file.name;
+                
                 // 生成厚度数组
                 const thicknesses = [];
                 for (let d = thicknessMin; d <= thicknessMax; d += thicknessStep) {
@@ -719,6 +766,7 @@
                     try {
                         // 解析CSV数据
                         data = parseCSV(e.target.result);
+                        data.filename = file.name; // 确保文件名正确保存
                         
                         if (data.f.length === 0) {
                             showAlert('未找到有效数据，请检查文件格式', 'danger');
@@ -744,12 +792,6 @@
                         plotComponentLosses();
                         plotImpedanceMatching(); // 新增绘图调用
                         
-                        // 绑定导出事件
-                        $('#exportSummaryInfo').on('click', exportSummaryInfo);
-                        $('#exportFullData').on('click', exportFullData);
-                        $('#exportModalData').on('click', exportModalData);
-                        $('#exportImpedanceData').on('click', exportImpedanceData); // 新增绑定
-                        
                         showAlert('计算完成', 'success');
                     } catch (error) {
                         console.error('解析数据时出错:', error);
@@ -762,4 +804,3 @@
     </script>
 </body>
 </html>
-    
